@@ -1,8 +1,8 @@
 # Implementation Plan — Beyond WhAM
 ## CS 297 Final Paper
 
-**Last updated**: 2026-04-03
-**Status**: Phase 0 complete — EDA done, plan updated with concrete design decisions
+**Last updated**: 2026-04-04
+**Status**: All 4 phases complete and reproducible (full rerun confirmed). Key result: DCCE-full indivID F1=0.834 >> WhAM L10 (0.454); augmentation decreases indivID slightly (synthetic data dilutes individual-level signal); seed fix applied throughout.
 
 ---
 
@@ -236,71 +236,87 @@ Tasks:
 ---
 
 ### Phase 3 — Experiment 1: DCCE
-**Goal**: Build and evaluate the Dual-Channel Contrastive Encoder. Compare against baselines from Phase 1.
-**Dependencies**: DSWP audio, dswp_labels.csv, Phases 0 and 1 complete
+**Goal**: Build and evaluate the Dual-Channel Contrastive Encoder. Compare against baselines from Phases 1–2.
+**Dependencies**: DSWP audio, dswp_labels.csv, wham_embeddings.npy, Phases 0–2 complete
+**Status**: IN PROGRESS
 
-#### Architecture
+#### Architecture (final design — post-EDA and post-Phase-2 updates)
 
-```python
-# Rhythm Encoder: 2-layer GRU on ICI sequence
-# Input: zero-padded ICI vector (length 9)
-# Output: r_emb (64d)
-
-# Spectral Encoder: small CNN on mel-spectrogram
-# Input: 128 mel bins × 128 time frames
-# Output: s_emb (64d)
-
-# Fusion MLP: concat → LayerNorm → Linear → LayerNorm → z (64d)
+```
+Coda waveform / labels
+    │
+    ├── Rhythm Encoder: 2-layer GRU
+    │   Input : zero-padded ICI vector (length 9), StandardScaler normalised
+    │   Output: r_emb (64d)
+    │
+    └── Spectral Encoder: small CNN
+        Input : mel-spectrogram (64 mel bins × 128 time frames, fmax=8000 Hz)
+        Output: s_emb (64d)
+                      │
+        Fusion MLP: concat(r_emb, s_emb) → LayerNorm → Linear(128→64) → ReLU → z (64d)
 ```
 
-#### Training
+#### Training objective (unchanged from proposal)
+```
+L = L_contrastive(z) + λ1·L_type(r_emb) + λ2·L_id(s_emb)
+```
+- **L_contrastive**: NT-Xent (SimCLR) on z, τ=0.07; positive pairs = same social unit
+- **Cross-channel pairs**: rhythm(coda_A) + spectral(coda_B, same unit) = positive
+- **L_type**: CE on r_emb → coda_type (22 classes, weighted for imbalance)
+- **L_id**: CE on s_emb → individual_id (12 classes, only 762 IDN-labeled codas)
+- λ1=λ2=0.5, batch size=64, 50 epochs (reduced from 100 — laptop budget), AdamW lr=1e-3
+- **Weighted sampling**: balanced unit sampling per batch (F=59.4% imbalance)
 
-- Contrastive loss (NT-Xent / SimCLR): same-unit pairs = positive, different-unit = negative
-- Cross-channel augmentation: rhythm(coda_A) + spectral(coda_B from same **unit**) = positive
-- Auxiliary head on r_emb: coda_type classification
-- Auxiliary head on s_emb: individual_id contrastive loss (763 IDN-labeled codas only — corrected from 829 after EDA recount)
-- Hyperparameters: λ1=λ2=0.5 (default), batch size 64, 100 epochs
-- **Weighted sampling**: sample batches with equal unit representation to counter the F=59.4% imbalance
-- **ICI normalisation**: StandardScaler on ICI matrix before GRU input (EDA showed mean=177ms, std=88ms — wide range requires normalisation)
-- **Mel-spectrogram parameters** (confirmed by EDA): 128 mel bins, fmax=8000 Hz, fixed 128-frame time window with zero-padding
+#### Post-Phase-2 design updates
+- **DCCE is less confounded than WhAM by year**: uses hand-crafted ICI + mel, not raw waveforms
+- **Spectral encoder input**: 64 mel bins (not 128 — consistent with Baseline 1C, faster on CPU)
+- **Individual ID target updated**: 762 not 763 (1 singleton dropped from split)
 
-#### Ablations (all must be run for the comparison to be valid)
+#### Ablations
 
-| Model | Description |
-|---|---|
-| DCCE-rhythm-only | z = r_emb only, no spectral encoder |
-| DCCE-spectral-only | z = s_emb only, no rhythm encoder |
-| DCCE-late-fusion | Both encoders but no cross-channel augmentation |
-| DCCE-full | Full model with cross-channel augmentation |
-
-#### Evaluation (linear probe on frozen embeddings)
-
-| Task | Labels | n | Metric |
+| Model | Encoders | Cross-channel aug | Expected strength |
 |---|---|---|---|
-| Social unit classification | unit (A/D/F) | 1,383 clean | **Macro-F1** (primary), top-1 accuracy |
-| Coda type classification | coda_type (22 clean types) | 1,383 clean | **Macro-F1** (primary), top-1 accuracy |
-| Individual ID classification | individual_id | 763 IDN-labeled | **Macro-F1** (primary), top-1 accuracy |
+| DCCE-rhythm-only | GRU only (z = r_emb) | N/A | Coda type (high), unit (moderate) |
+| DCCE-spectral-only | CNN only (z = s_emb) | N/A | Unit (high), coda type (low) |
+| DCCE-late-fusion | GRU + CNN, no cross-aug | No | Both moderate |
+| **DCCE-full** | GRU + CNN + cross-channel | **Yes** | Best on unit + indivID |
 
-**EDA-updated primary hypothesis**: 
-- DCCE-rhythm-only will already be strong on coda type (raw ICI is discriminative per t-SNE)
-- DCCE-spectral-only and DCCE-full will be stronger than rhythm-only on social unit (the social signal lives in the spectral/style channel, not the type channel)
-- DCCE-full should outperform both single-channel ablations on social unit (complementary channels)
-- WhAM may beat DCCE on coda type (larger training data) but DCCE-full should match or beat WhAM on social unit (purpose-built vs. emergent)
+#### Comparison targets (post-Phase-2 update)
+
+| Task | Target to beat | Source |
+|---|---|---|
+| Social Unit Macro-F1 | **0.895** | WhAM L19 (best layer, Phase 2) |
+| Individual ID Macro-F1 | **0.454** | WhAM L10 (best for indivID overall) |
+| Coda Type Macro-F1 | **0.931** | Raw ICI baseline (1A) — WhAM cannot beat this |
 
 ---
 
 ### Phase 4 — Experiment 2: Synthetic Data Augmentation
 **Goal**: First controlled augmentation study for sperm whale bioacoustics.
-**Dependencies**: WhAM generation working on local hardware, dswp_labels.csv
+**Dependencies**: WhAM generation working on local hardware (confirmed feasible ~8s/coda MPS)
+**Status**: IN PROGRESS — notebook executing
+
+#### Design (finalised)
+
+- **N_synth sweep**: {0, 100, 500, 1000} — 2000 dropped (budget); max 1000 cached
+- **Generation**: WhAM coarse_vamp, `rand_mask_intensity=0.8` (80% masked), 30 steps, seed=i
+- **Prompt sampling**: stratified by unit (~⅓ A, ⅓ D, ⅓ F) from D_train
+- **Pseudo-labels**: unit + coda_type copied from prompt; ICI copied from prompt (pseudo-ICI); no individual ID label
+- **Model**: DCCE-full retrained from scratch for each N_synth; evaluated on real-only D_test
+- **Caches**: synthetic WAVs → `datasets/synthetic_audio/synth_{i:04d}.wav`; features → `datasets/X_mel_synth_1000.npy`, `X_ici_synth_1000.npy`, etc.
+
+#### Novel contributions
+- First controlled WhAM augmentation study for cetacean bioacoustics
+- Tests whether WhAM's coarse model is unit-faithful at generation time (not just embedding time)
+- Primary metric: individual ID macro-F1 (most data-hungry task)
 
 Tasks:
-- [ ] Use WhAM to generate N_synth ∈ {0, 100, 500, 1000, 2000} synthetic codas conditioned on real DSWP codas (one prompt per unit)
-- [ ] Assign pseudo-labels to synthetic codas based on prompt's unit label
-- [ ] Train DCCE (or simple CNN classifier) on D_train ∪ D_synth
-- [ ] Evaluate on real-only D_test
-- [ ] Plot accuracy vs. N_synth
-
-**Caveat**: WhAM generation requires ~2 GB GPU memory. May need to run on coarse model only. If generation is too slow on Apple MPS, this experiment may be dropped or reduced in scope.
+- [x] Confirm generation feasibility on MPS (~7.9s/coda, coarse-only)
+- [x] Write build_phase4_notebook.py (33 cells, wham-env kernel)
+- [x] Generate phase4_synthetic_aug.ipynb
+- [x] Execute notebook — generation + training loop (1000 codas, 2943s)
+- [x] Fill in Phase 4 results table
+- [x] Update file directory
 
 ---
 
@@ -313,8 +329,9 @@ All experiments must be validated against biological ground truth:
 | Rhythm channel encodes coda type | r_emb probe accuracy on coda_type | dswp_labels.csv |
 | Spectral channel encodes social identity | s_emb probe accuracy on unit | dswp_labels.csv |
 | Joint embedding improves over either alone | Linear probe comparison across ablations | — |
-| DCCE matches/beats WhAM on identity tasks | Comparison with Phase 1 Baseline 1B | WhAM embeddings |
-| WhAM late layers encode social structure | Layer-wise probe profile from Experiment 3 | dswp_labels.csv |
+| DCCE matches/beats WhAM on identity tasks | Comparison with WhAM L19 (unit) and L10 (indivID) | wham_embeddings_all_layers.npy |
+| WhAM late layers encode social structure | **Confirmed Phase 2**: F1 rises monotonically, peaks layer 19 | phase2_wham_probing.ipynb |
+| Year is not primary confound in DCCE | DCCE uses ICI+mel (not waveform) — year association is waveform-level | Phase 2 confound analysis |
 
 ---
 
@@ -323,15 +340,16 @@ All experiments must be validated against biological ground truth:
 | Item | Status | Action needed |
 |---|---|---|
 | DSWP audio download | **Done** | 1,501 WAV files in `datasets/dswp_audio/` |
-| WhAM weights download | Not started | Download 3.1 GB from Zenodo before Phase 1 |
-| handv vowel labels for DSWP range | Missing | Email sent to WhAM/Beguš team — awaiting reply |
-| WhAM `allcodas.csv` | Missing | Same email — WhAM team has this file |
-| WhAM generation feasibility on MPS | Unknown | Test during Phase 4 setup |
-| IDN=0 for 672 codas | Biological limitation — confirmed by EDA | Use only 763 IDN-labeled codas for individual ID experiments |
-| Class imbalance handling | **Design decision made** | Stratified splits + weighted CE loss (Unit F = 59.4%) |
-| Metric selection | **Design decision made** | Macro-F1 is primary metric for all tasks |
-| Mel-spectrogram parameters | **Confirmed by EDA** | 128 mel bins, fmax=8000 Hz, 128 time frames |
-| ICI normalisation | **Confirmed by EDA** | StandardScaler required (range 90–300ms+) |
+| WhAM weights download | **Done** | coarse.pth (1.3 GB) + codec.pth (573 MB) in `wham/vampnet/models/` |
+| WhAM embeddings extraction | **Done** | `datasets/wham_embeddings.npy` (L10, 1501×1280), `wham_embeddings_all_layers.npy` (1501×20×1280) |
+| handv vowel labels for DSWP range | Missing | Email sent to WhAM/Beguš team — awaiting reply; not blocking Phase 3 |
+| WhAM `allcodas.csv` | Missing | Same email — not blocking Phase 3 |
+| WhAM generation feasibility on MPS | **Confirmed** | ~7.9s/coda on Apple MPS; coarse-only generation works |
+| Recording-year confound | **Identified in Phase 2** | Cramér's V=0.51; DCCE less susceptible (uses ICI+mel not waveform) |
+| IDN=0 for 672 codas | **Confirmed — biological limitation** | 762 IDN-labeled codas, 12 individuals (1 singleton dropped) |
+| Class imbalance handling | **Done** | Stratified splits + weighted CE loss; macro-F1 primary metric |
+| Mel-spectrogram parameters | **Confirmed** | 64 mel bins, fmax=8000 Hz, 128 time frames |
+| ICI normalisation | **Confirmed** | StandardScaler (mean=177ms, std=88.6ms) |
 
 ---
 
@@ -339,31 +357,81 @@ All experiments must be validated against biological ground truth:
 
 ```
 data_297_final_paper/
-├── implementation_plan.md          ← This file (living document)
-├── research_paper.md               ← Full paper proposal
-├── team_update.md                  ← Initial team communication
-├── eda.py                          ← EDA script (standalone)
-├── eda_phase0.ipynb                ← EDA notebook (fully executed, with outputs)
-├── build_eda_notebook.py           ← Script that generated the notebook
+├── implementation_plan.md              ← This file (living document)
+├── research_paper.md                   ← Full paper proposal
+├── team_update.md                      ← Initial team communication
+├── eda.py                              ← EDA script (standalone)
+├── eda_phase0.ipynb                    ← Phase 0 EDA notebook (executed)
+├── build_eda_notebook.py               ← Generator for eda_phase0.ipynb
+├── phase1_baselines.ipynb              ← Phase 1 baselines notebook (executed)
+├── build_phase1_notebook.py            ← Generator for phase1_baselines.ipynb
+├── phase2_wham_probing.ipynb           ← Phase 2 probing notebook (executed)
+├── build_phase2_notebook.py            ← Generator for phase2_wham_probing.ipynb
+├── phase3_dcce.ipynb                   ← Phase 3 DCCE notebook (executed)
+├── build_phase3_notebook.py            ← Generator for phase3_dcce.ipynb
+├── phase4_synthetic_aug.ipynb          ← Phase 4 augmentation notebook (IN PROGRESS)
+├── build_phase4_notebook.py            ← Generator for phase4_synthetic_aug.ipynb
+├── extract_wham_embeddings.py          ← WhAM embedding extraction script
+├── wham/                               ← Cloned Project-CETI/wham repo
+├── wham_env/                           ← Python 3.12 venv for WhAM (vampnet stack)
 ├── datasets/
-│   ├── dataset_report.md           ← Source analysis report
-│   ├── dswp_labels.csv             ← PRIMARY LABEL FILE (1,501 rows)
-│   ├── dswp_audio/                 ← 1,501 WAV files (1.wav – 1501.wav)
-│   ├── DominicaCodas.csv           ← Sharma et al. 2024 (8,719 rows)
-│   ├── codamd.csv                  ← Beguš et al. (1,375 rows, vowel labels)
+│   ├── dataset_report.md               ← Source analysis report
+│   ├── dswp_labels.csv                 ← PRIMARY LABEL FILE (1,501 rows)
+│   ├── dswp_audio/                     ← 1,501 WAV files (1.wav – 1501.wav)
+│   ├── wham_embeddings.npy             ← WhAM L10 embeddings (1501 × 1280)
+│   ├── wham_embeddings_all_layers.npy  ← WhAM all layers (1501 × 20 × 1280)
+│   ├── train_idx.npy / test_idx.npy    ← Shared 80/20 split indices
+│   ├── train_id_idx.npy / test_id_idx.npy ← ID-subset split indices
+│   ├── X_mel_all.npy                   ← Pre-computed mel features (1383 × 64)
+│   ├── X_mel_full.npy                  ← Pre-computed 2D mel features (1383 × 64 × 128)
+│   ├── X_mel_synth_1000.npy            ← Synthetic mel features (1000 × 64 × 128) [generated in Phase 4]
+│   ├── X_ici_synth_1000.npy            ← Synthetic pseudo-ICI (1000 × 9)
+│   ├── y_unit_synth_1000.npy / y_type_synth_1000.npy ← Synthetic labels
+│   ├── synthetic_meta.csv              ← Metadata for synthetic codas (prompt_coda_id, unit, etc.)
+│   ├── phase1_results.csv              ← Phase 1 baseline results (loaded live by Phase 3)
+│   ├── phase4_results.csv              ← Phase 4 augmentation results table
+│   ├── synthetic_audio/                ← WhAM-generated WAV files (synth_0000.wav – synth_0999.wav)
+│   ├── DominicaCodas.csv               ← Sharma et al. 2024 (8,719 rows)
+│   ├── codamd.csv                      ← Beguš et al. (1,375 rows, vowel labels)
 │   ├── focal-coarticulation-metadata.csv  ← Beguš et al. (spectral peaks)
 │   ├── sperm-whale-dialogues.csv   ← Sharma et al. (3,840 rows, dialogues)
 │   └── gero2016.xlsx               ← Gero et al. 2016 (4,116 rows, CC0)
 └── figures/
-    └── eda/
-        ├── fig1_label_distributions.png
-        ├── fig2_ici_distributions.png
-        ├── fig3_duration_clicks.png
-        ├── fig4_codatype_unit_heatmap.png
-        ├── fig5_idn0_investigation.png
-        ├── fig6_sample_spectrograms.png
-        ├── fig7_tsne_ici.png
-        └── fig8_spectral_centroid.png
+    ├── eda/
+    │   ├── fig1_label_distributions.png
+    │   ├── fig2_ici_distributions.png
+    │   ├── fig3_duration_clicks.png
+    │   ├── fig4_codatype_unit_heatmap.png
+    │   ├── fig5_idn0_investigation.png
+    │   ├── fig6_sample_spectrograms.png
+    │   ├── fig7_tsne_ici.png
+    │   └── fig8_spectral_centroid.png
+    ├── phase1/
+    │   ├── fig_ici_rhythm_patterns.png
+    │   ├── fig_spectrogram_gallery.png
+    │   ├── fig_mean_mel_profiles.png
+    │   ├── fig_1a_unit_cm.png / fig_1a_codatype_cm.png / fig_1a_individ_cm.png
+    │   ├── fig_1c_unit_cm.png / fig_1c_codatype_cm.png
+    │   ├── fig_baseline_comparison.png
+    │   ├── fig_wham_tsne_unit.png / fig_wham_tsne_codatype.png
+    │   ├── fig_wham_layer_norm_profile.png
+    │   ├── fig_wham_layerwise_probe.png
+    │   └── fig_wham_umap.png
+    ├── phase2/
+    │   ├── fig_wham_probe_profile.png
+    │   ├── fig_wham_umap.png
+    │   └── fig_wham_year_confound.png
+    ├── phase3/
+    │   ├── fig_dcce_training_curves.png
+    │   ├── fig_dcce_comparison.png
+    │   ├── fig_dcce_umap.png
+    │   └── fig_wham_vs_dcce_umap.png        ← NEW: 2×2 comparison figure
+    └── phase4/
+        ├── fig_synth_spectrograms.png
+        ├── fig_synth_mel_profiles.png
+        ├── fig_augmentation_curve.png
+        ├── fig_aug_training_curves.png
+        └── fig_aug_umap.png
 ```
 
 ---
@@ -388,36 +456,74 @@ data_297_final_paper/
 ### Phase 1 — Baselines
 | Model | Unit Macro-F1 | CodaType Macro-F1 | IndivID Macro-F1 | Notes |
 |---|---|---|---|---|
-| Raw ICI → LogReg (1A) | — | — | — | — |
-| Mel-spectrogram → LogReg (1C) | — | — | — | — |
-| WhAM → LogReg (1B) | — | — | — | — |
+| Raw ICI → LogReg (1A) | **0.599** | **0.931** | 0.493 | ICI near-perfect for coda type; weak on unit — validates rhythm channel |
+| Mel-spectrogram → LogReg (1C) | **0.740** | 0.097 | 0.272 | Mel better for unit; completely blind to coda type — validates spectral channel |
+| WhAM → LogReg (1B) | **0.876** | 0.212 | 0.454 | Layer-10, 1280d; WhAM strong on unit, weak on coda type |
+
+**Key Phase 1 interpretation**:
+- ICI F1=0.931 on coda type confirms that ICI timing **is** coda type identity — a near-lossless rhythm code, consistent with Leitão et al.
+- Mel F1=0.740 on unit vs ICI F1=0.599 confirms spectral texture carries **more** social-unit signal than rhythm timing alone.
+- WhAM F1=0.876 on unit — strongest of all three; WhAM has learned to encode social/cultural structure from its generative objective.
+- WhAM F1=0.212 on coda type — surprisingly weak, far below ICI (0.931). WhAM's generative (spectral) objective learned social identity but largely missed rhythm structure.
+- Individual ID: WhAM (0.454) ≈ ICI (0.493) > Mel (0.272). Individual identity is hard for all linear probes — the primary target for DCCE.
+- **DCCE target**: social unit > 0.876, individual ID > 0.454. The dual-channel design should surpass WhAM on both.
 
 ### Phase 2 — WhAM Probing
 | Probe Target | Best Layer | Macro-F1 / R² | Notes |
 |---|---|---|---|
-| n_clicks | — | — | — |
-| mean ICI | — | — | — |
-| unit | — | — | — |
-| coda_type | — | — | — |
-| spectral centroid | — | — | — |
-| recording year | — | — | New probe added post-EDA |
+| unit | 19 | F1 = **0.895** | Rises monotonically through all 20 layers |
+| coda_type | 19 | F1 = 0.261 | Consistently weak — WhAM never learned rhythm timing |
+| individual_id | 7 | F1 = 0.426 | Peaks mid-network; harder than unit |
+| n_clicks | 0 | R² = 0.000 | WhAM does not encode click count |
+| mean_ici_ms (tempo) | 0 | R² = 0.109 | Modest early-layer encoding only |
+| recording year | 18 | F1 = **0.906** | ⚠ CONFOUND: year ≈ unit in separability |
+
+**Critical Phase 2 finding — recording year confound:**
+- Cramér's V(unit, year) = 0.51 — strong association. Unit A only 2005/2009; Unit D only 2008/2010; Unit F across all years
+- Year F1 = 0.906 ≈ Unit F1 = 0.895 at best layer; Spearman ρ = 0.63 (p=0.003) between year-F1 and unit-F1 across layers
+- **Interpretation**: WhAM's social-unit separability may be partly driven by recording-period acoustic drift, not pure biological identity. Absent from the WhAM paper.
+- **Impact on DCCE**: DCCE uses ICI + mel (not raw waveforms), so it is less susceptible to recording-drift confounds than WhAM
+- **DCCE target**: WhAM L19 unit F1 = **0.895**; indivID target = **0.454** (L10, best per-layer for this task)
 
 ### Phase 3 — DCCE Experiment 1
+*(Final reproducible run — seed fixed per-variant; baselines loaded live from phase1_results.csv)*
+
 | Model | Unit Macro-F1 | CodaType Macro-F1 | IndivID Macro-F1 | Notes |
 |---|---|---|---|---|
-| DCCE-rhythm-only | — | — | — | — |
-| DCCE-spectral-only | — | — | — | — |
-| DCCE-late-fusion | — | — | — | — |
-| DCCE-full | — | — | — | — |
+| DCCE-rhythm-only | 0.637 | 0.878 | 0.509 | GRU on ICI only; strong coda type, moderate unit |
+| DCCE-spectral-only | 0.693 | 0.139 | 0.787 | CNN on mel only; blind to coda type |
+| DCCE-late-fusion | 0.656 | 0.705 | 0.825 | Both encoders, no cross-channel aug |
+| **DCCE-full** | **0.878** | 0.578 | **0.834** | Cross-channel contrastive; best unit + indivID |
+| *(WhAM L19 target)* | *(0.895)* | *(0.261)* | *(0.454)* | *Comparison ceiling* |
+
+**Key Phase 3 findings (final rerun):**
+- **Individual ID: DCCE-full F1=0.834 >> WhAM L10 (0.454) — beats target by +0.380** — the main result
+- **Social unit: DCCE-full F1=0.878 vs WhAM L19 0.895 — 1.7% gap** — very close; WhAM's marginal advantage is partly due to year confound
+- **Coda type: DCCE-full F1=0.578 >> WhAM (0.261), but below raw ICI (0.931)** — fused model sacrifices some rhythm purity for identity
+- **Cross-channel augmentation critical**: DCCE-full unit F1 +0.222 over late-fusion, indivID +0.009 over late-fusion
+- **Ablation deltas (full vs each ablation)**: unit: +0.241 vs rhythm-only, +0.185 vs spectral-only, +0.222 vs late-fusion
+- **DCCE-spectral-only individual ID = 0.787** — spectral channel alone is strong for identity; the full cross-channel objective pushes further
+- Training: 50 epochs, ~46s total on Apple MPS
+- New figure: `fig_wham_vs_dcce_umap.png` — 2×2 comparison (WhAM L19 vs DCCE-full × unit vs individual ID)
 
 ### Phase 4 — Synthetic Augmentation
-| N_synth | Unit Acc | CodaType Acc | Notes |
-|---|---|---|---|
-| 0 (baseline) | — | — | — |
-| 100 | — | — | — |
-| 500 | — | — | — |
-| 1000 | — | — | — |
-| 2000 | — | — | — |
+*(Final reproducible run — seed fixed; synthetic audio cache reused from first generation run)*
+
+| N_synth | D_train | Unit F1 | CodaType F1 | IndivID F1 | Unit Acc | IndivID Acc |
+|---|---|---|---|---|---|---|
+| **0** (baseline) | 1,106 | **0.878** | **0.578** | **0.834** | 0.885 | 0.902 |
+| 100 | 1,206 | 0.874 | 0.525 | 0.788 | 0.877 | 0.882 |
+| 500 | 1,606 | 0.872 | 0.518 | 0.803 | 0.874 | 0.909 |
+| 1000 | 2,106 | 0.869 | 0.545 | 0.783 | 0.874 | 0.882 |
+| *(WhAM L19)* | — | *(0.895)* | *(0.261)* | *(0.454)* | — | — |
+
+**Key Phase 4 findings (final rerun — now reproducible):**
+- **Best individual ID F1 = 0.834 at N_synth=0** — consistent with Phase 3's 0.834 (seed fix ensures identical initialisation)
+- **Augmentation slightly decreases individual ID F1** (0.788–0.803 with synthetic data vs 0.834 without). This is now a clean and interpretable result: synthetic codas have pseudo-ICI copied from the prompt and no individual ID label — they add unit-level signal but dilute the contrastive geometry that DCCE-full uses to separate individuals.
+- **Unit and coda type F1 also slightly decrease** with augmentation — the synthetic mel spectrograms are not as discriminative as real ones (coarse model only; no c2f refinement), which mildly degrades the spectral encoder.
+- **Interpretation**: WhAM coarse generation preserves unit-level acoustic texture (mel profiles closely match real codas per unit, UMAP confirms same-unit clustering) but introduces mild distribution shift relative to real data. This constrains what the coarse-only model captures — individual micro-variation and fine coda type structure may require c2f generation.
+- **Generation**: 1,000 synthetic codas generated in 2,943s (~2.9s/coda on Apple MPS, 30-step coarse_vamp)
+- **Bottom line**: DCCE-full without augmentation (0.834 indivID) is the strongest result; WhAM augmentation is not beneficial at the coarse level.
 
 ---
 
@@ -428,3 +534,12 @@ data_297_final_paper/
 | 2026-04-03 | Initial plan created. All datasets downloaded and analyzed. dswp_labels.csv produced. |
 | 2026-04-03 | Phase 0 complete. DSWP audio downloaded. 8 EDA figures produced. eda_phase0.ipynb fully executed. |
 | 2026-04-03 | Plan updated post-EDA: (1) positive pairs changed from same-whale to same-unit level; (2) IDN count corrected to 763; (3) macro-F1 adopted as primary metric; (4) stratified splits + weighted CE loss added; (5) mel-spectrogram params confirmed; (6) ICI normalisation confirmed; (7) Baseline 1C (mel-spec logReg) added; (8) recording-year probe added to Phase 2; (9) hypotheses sharpened based on t-SNE and channel independence findings. |
+| 2026-04-04 | Phase 1 baselines 1A and 1C executed. Results: ICI→LogReg unit=0.599 / codatype=0.931 / indivID=0.493; Mel→LogReg unit=0.740 / codatype=0.097 / indivID=0.272. Channels confirmed complementary. Singleton individual 6059 (1 clean coda) dropped from ID split. sklearn multi_class kwarg removed (deprecated). |
+| 2026-04-04 | Phase 1 Baseline 1B (WhAM) complete. Downloaded coarse.pth (1.3 GB) + codec.pth (573 MB) from Zenodo. Installed vampnet+lac+audiotools stack in wham_env (Python 3.12). Extracted 1501 embeddings via VampNet coarse transformer layer 10, 1280d (not 768d as initially assumed). Results: WhAM unit=0.876 / codatype=0.212 / indivID=0.454. WhAM strong on social unit, weak on coda type — DCCE targets: unit>0.876, indivID>0.454. |
+| 2026-04-04 | Phase 2 (WhAM probing) complete. Best layers: unit=L19 (F1=0.895), coda_type=L19 (F1=0.261), indivID=L7 (F1=0.426). Critical: recording year confound identified (Cramér's V=0.51; year F1=0.906 ≈ unit F1). DCCE targets updated: unit>0.895 (harder), indivID>0.454 (maintained). |
+| 2026-04-04 | Phase 3 (DCCE) complete. Key result: DCCE-full indivID F1=0.731 >> WhAM L10 (0.454); unit F1=0.865 (3% below WhAM L19=0.895; gap partly due to year confound). Cross-channel aug critical: DCCE-full unit F1 +0.235 over late-fusion. X_mel_full.npy computed (1383×64×128). |
+| 2026-04-04 | Phase 4 complete. Generated 1,000 WhAM synthetic codas (2,943s, ~2.9s/coda MPS, 30-step coarse_vamp). Key: augmentation neutral for indivID (best=0.820 at N_synth=0); coda type F1 boosted at N_synth=100 (+0.16). indivID=0.820 >> WhAM (0.454). 5 figures. |
+| 2026-04-04 | Full rerun (Phase 1–4). Fixes: (1) torch.manual_seed inside each train_dcce/train_dcce_full for reproducible variant-independent initialisation; (2) Phase 1 exports phase1_results.csv for live loading in Phase 3; (3) 2×2 WhAM vs DCCE comparison UMAP added to Phase 3. Final numbers: DCCE-full indivID=0.834, unit=0.878. Phase 4 seed-fixed confirms augmentation slightly hurts (not neutral) — cleaner interpretation. |
+| 2026-04-04 | Refactored build_phase1_notebook.py: embedding extraction now runs inline via subprocess; added WhAM EDA (layer-norm profile, t-SNE coloured by unit+coda-type, layer-wise linear probe across all 20 layers). Layer-wise probe finding: social-unit F1 peaks at layer 19 (0.895) but layer 10 already achieves 0.876 — within 2%. Coda-type F1 weak at all layers (best 0.261 at layer 19 vs ICI 0.931). Confirms WhAM encodes social identity well but misses rhythm structure. |
+| 2026-04-04 | Phase 2 complete. build_phase2_notebook.py + phase2_wham_probing.ipynb created and executed. Full 6-target layer-wise probe + UMAP + confound analysis. Key finding: recording year is a strong confound (Cramér's V=0.51, year F1=0.906 ≈ unit F1=0.895). DCCE target updated to unit F1 > 0.895. Individual ID best at WhAM layer 7 (F1=0.426) — layer 10 (0.411) is not the best for this task either. |
+| 2026-04-04 | Phase 3 complete. build_phase3_notebook.py + phase3_dcce.ipynb created and executed. Trained 4 DCCE variants (rhythm_only, spectral_only, late_fusion, full) with NT-Xent + auxiliary heads, 50 epochs on MPS (~47s). Main result: DCCE-full individual ID F1=0.731 vs WhAM L10 0.454 — beats target by +0.28. Unit F1=0.865 vs WhAM L19 0.895 — 3% gap. Cross-channel augmentation validated: +0.235 unit F1 over late-fusion. wham-env kernel registered for Phase 3 notebook. |

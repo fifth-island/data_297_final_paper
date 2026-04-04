@@ -1,0 +1,16 @@
+# Virtual environments
+.venv/
+wham_env/
+
+# Cloned repos (use `git submodule add` if needed)
+wham/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
