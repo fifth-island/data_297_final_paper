@@ -2,8 +2,9 @@
 .venv/
 wham_env/
 
-# Cloned repos (use `git submodule add` if needed)
-wham/
+# Large external dependency folder is tracked in this repo when needed.
+# Keep its nested git metadata out of the parent repository.
+wham/.git/
 
 # Python
 __pycache__/

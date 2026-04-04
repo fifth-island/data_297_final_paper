@@ -1,1 +1,10 @@
-datasets/wham_embeddings_all_layers.npy filter=lfs diff=lfs merge=lfs -text
+# Large datasets / model artifacts via Git LFS
+datasets/*.npy filter=lfs diff=lfs merge=lfs -text
+datasets/*.csv filter=lfs diff=lfs merge=lfs -text
+datasets/**/*.wav filter=lfs diff=lfs merge=lfs -text
+datasets/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+datasets/**/*.flac filter=lfs diff=lfs merge=lfs -text
+wham/**/*.pth filter=lfs diff=lfs merge=lfs -text
+wham/**/*.pt filter=lfs diff=lfs merge=lfs -text
+wham/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
+wham/**/*.bin filter=lfs diff=lfs merge=lfs -text
