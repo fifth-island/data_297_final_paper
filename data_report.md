@@ -679,3 +679,823 @@ from the Dominica Sperm Whale Project (DSWP)
 - **Macro-F1**: computes F1 separately for each class and averages — so a unit-F-always classifier gets macro-F1 ≈ 0.20 (poor), exposing the failure that accuracy hides
 - **Balanced class weights** (`class_weight="balanced"` in sklearn): the loss for a minority-class error is upweighted by inverse class frequency — this prevents the model from collapsing to predict the majority class
 - **WeightedRandomSampler**: at training time, each batch is drawn so that unit A, D, and F contribute roughly equally — instead of 59% of each batch being unit F examples
+
+---
+
+## Slide 9: The Population — Who Are These Whales?
+
+**Title:** The Population
+**Subtitle:** 3 matrilineal family units · 12 named individuals · 5 years of field work
+
+---
+
+### Layout: Full-bleed "family tree" style
+
+**Top row — Clan banner:**
+```
+EC1 Vocal Clan (Eastern Caribbean 1)
+1,501 codas  ·  35 coda types  ·  2005–2010
+```
+
+**Middle row — 3 unit cards (side by side):**
+
+| | Unit A | Unit D | Unit F |
+|---|---|---|---|
+| **Color** | Blue #4C72B0 | Orange #DD8452 | Green #55A868 |
+| **Codas (total)** | 273 | 336 | 892 |
+| **Clean codas** | 241 | 321 | 821 |
+| **Named individuals** | ~5 identified | ~5 identified | ~3 identified (rest IDN=0) |
+| **IDN=0 rate** | 21.6% | 7.7% | **73.2%** |
+| **Recording period** | Mostly 2005 | Mostly 2010 | Spread 2005–2010 |
+| **Dominant coda type** | 1+1+3 | 1+1+3 | 1+1+3 |
+| **Typical ICI** | 222ms (slow) | 85ms (fast) | 180ms (mid) |
+
+**Bottom row — Key insight callout box (dark background, white text):**
+> "These are not three random groups — they are matrilineal whale families. Unit A, D, and F are separate family lines within the same clan. They share a coda repertoire but have distinct voices."
+
+**Side KPI strip (right margin, vertical):**
+- `12` — Named individuals used in ID experiments
+- `36` — Total unique IDNs in full corpus
+- `49.2%` — Codas with unknown speaker
+
+---
+
+**Chart spec:** No traditional chart. Design as three side-by-side cards with unit-color header bars. Inside each card: big number (coda count) at top, then a 5-bar sparkline showing recording year distribution for that unit (years 2005–2010 on x-axis, count on y-axis, bar fill = unit color). Below the cards: a horizontal timeline (2005–2010) with colored dots marking when each unit was primarily recorded.
+
+---
+
+#### Talking points
+- The three units are not categories in a database — they are real, named family groups. Shane Gero and the DSWP team know these whales individually and have followed them for 20 years
+- Unit F dominates the dataset (892 codas, 59.4%) because it is the largest social unit and was encountered most often during the field seasons covered by this audio release
+- The IDN=0 asymmetry tells a field story: Unit F has 73.2% unidentified codas because multi-animal encounters were common and attribution is hard when several whales vocalize simultaneously
+- The recording year profiles (sparklines) are the visual setup for the year confound analysis — Unit A in 2005, Unit D in 2010 is the core of that problem
+
+---
+
+## Slide 10: Anatomy of a Coda — From Audio to Features
+
+**Title:** Anatomy of a Coda
+**Subtitle:** One WAV file → two information channels
+
+---
+
+### Layout: Horizontal flow diagram (left-to-right, 4 stages)
+
+**Stage 1 — Raw Audio Waveform**
+```
+Source: coda 486.wav  |  Unit F  |  Type: 1+1+3  |  Duration: 0.91s
+```
+- Visual: waveform plot of a single coda (amplitude vs. time)
+- Shows 5 click bursts separated by silence gaps
+- Click pattern visually matches 1+1+3: burst · long gap · burst · long gap · burst · burst · burst
+- **KPI bubble:** "5 clicks  ·  0.91s"
+
+**Arrow →**
+
+**Stage 2 — ICI Extraction (Rhythm Channel)**
+- Visual: a simple timeline diagram showing 5 labeled click events with measured gaps
+- Click markers at time positions (example values for a 1+1+3 coda):
+  - Click 1 at t=0ms
+  - ICI₁ = 218ms → Click 2 at t=218ms
+  - ICI₂ = 231ms → Click 3 at t=449ms
+  - ICI₃ = 83ms → Click 4 at t=532ms
+  - ICI₄ = 79ms → Click 5 at t=611ms
+- Color the first two gaps in one shade (long, "1+1" part) and last two in another (short, "3" part)
+- **Output box (blue):** ICI vector `[218, 231, 83, 79] ms` → zero-pad → `[218, 231, 83, 79, 0, 0, 0, 0, 0]` → GRU encoder
+
+**Arrow →**
+
+**Stage 3 — Mel-Spectrogram (Spectral Channel)**
+- Visual: description of spectrogram (64-mel × time frames, magma colormap)
+- 5 bright vertical bands (one per click), background dark
+- Energy concentrated 2–8 kHz
+- The *shape* of each band = spectral texture = voice identity signal
+- **Output box (green):** 64 × T mel-spectrogram → CNN encoder
+
+**Arrow →**
+
+**Stage 4 — Two Outputs**
+- Top box: "CODA TYPE (rhythm)" — what pattern of clicks → 22 categories
+- Bottom box: "SPEAKER IDENTITY (spectral)" — whose voice → unit A / D / F + individual ID
+
+---
+
+**KPI callout strip (bottom of slide):**
+| | Rhythm (ICI) | Spectral (mel) |
+|---|---|---|
+| Feature dim | 9 values | 64 × T matrix |
+| Source | Pre-computed CSV | Extracted from WAV |
+| Predicts | Coda type F1 = **0.931** | Unit F1 = **0.740** |
+| Fails at | Unit / Individual ID | Coda type classification |
+
+---
+
+**Chart spec:** No traditional chart. Design as a 4-panel horizontal infographic: (1) waveform time series plot (librosa.display.waveshow), (2) annotated timeline with ICI brackets and values, (3) mel-spectrogram (librosa.display.specshow, n_mels=64, fmax=8000, cmap="magma"), (4) two-box diagram with labels and F1 values. All panels for the same single coda.
+
+---
+
+#### Talking points
+- Every experiment in this paper starts here: one audio file → two feature extraction pipelines running in parallel
+- The waveform already reveals the coda type visually — you can count the 5 click bursts and see the 1+1 pattern (two isolated clicks) followed by the 3 (rapid triple). No ML needed to identify the rhythm structure from the raw audio
+- The ICI vector is what gets fed to the rhythm (GRU) encoder. Pre-computation from DominicaCodas.csv means we bypass peak detection entirely — a robustness advantage
+- The mel-spectrogram is what gets fed to the spectral (CNN) encoder. The information here is orthogonal to the ICI: two codas with identical ICIs can have completely different mel patterns if produced by different individuals
+- The bottom table is the punchline of this slide: each channel is good at exactly what the other is bad at. This is the biological prior that motivates combining them
+
+---
+
+## Slide 11: The Rhythm Channel — What ICI Reveals and Conceals
+
+**Title:** The Rhythm Channel
+**Subtitle:** ICI sequences strongly encode coda type — but fail at speaker identity
+
+---
+
+### Layout: Three-column (left: ICI distributions, center: t-SNE, right: classification F1)
+
+**Left column — ICI by Social Unit:**
+
+| Unit | Mean ICI (ms) | Median ICI (ms) |
+|---|---|---|
+| A | 217.5 | 222.3 |
+| D | 130.3 | 85.5 |
+| F | 183.5 | 180.2 |
+
+Visual: three vertical bars proportional to mean ICI, with median values annotated inside. Unit colors (A=blue, D=orange, F=green).
+
+**Left column — ICI Distribution by Coda Type (horizontal bar chart):**
+
+| Coda Type | Median ICI (ms) |
+|---|---|
+| 4D | 85 |
+| 7D1 | 87 |
+| 5R1 | 100 |
+| 4R1 | 108 |
+| 3R1 | 115 |
+| 3 | 140 |
+| 5 | 155 |
+| 1+1+3 | 222 |
+
+Sorted ascending by median ICI. Horizontal bars with value labels.
+
+**Center — t-SNE of Standardised ICI Vectors (n=1,383):**
+
+Two side-by-side scatter plots from the same t-SNE projection:
+- Left panel: "Coloured by Unit" — dots colored by Unit A/D/F. Units are **fully intermixed** with no visible separation.
+- Right panel: "Coloured by Coda Type" — dots colored by top coda types. **Tight, well-separated clusters** by coda type.
+
+Legend below: Unit A (blue) · Unit D (orange) · Unit F (green) | 1+1+3 · 5R1 · 4D · 7D1
+
+**Right column — Raw ICI → Logistic Regression F1 (horizontal progress bars):**
+
+| Task | F1 |
+|---|---|
+| Coda Type | **0.931** (green bar, very strong) |
+| Social Unit | 0.599 (orange bar, poor) |
+| Individual ID | 0.493 (red bar, near-chance) |
+
+**Key finding callout (dark background):**
+> Raw ICI achieves F1 = 0.931 for coda type but only 0.599 for unit and 0.493 for individual ID. The rhythm channel knows *what was said* but not *who said it*.
+
+**Design implication callout (light background):**
+> The rhythm encoder must learn *within-type micro-variation* via contrastive training — not just classify coda type.
+
+---
+
+**Chart spec:** Left column: unit ICI bars as vertical bars proportional to value, horizontal bar chart for coda type ICI (recharts BarChart, layout="vertical"). Center: two SVG scatter plots from t-SNE with unit-colored vs. coda-type-colored dots. Right: three horizontal progress bars with F1 values labeled. Insight boxes below.
+
+---
+
+#### Talking points
+- This is the single most important EDA finding: the t-SNE shows that ICI vectors form tight coda-type clusters (panel b) but produce completely intermixed social-unit clouds (panel a)
+- The F1 bars quantify what the t-SNE shows: raw ICI achieves 0.931 for coda type (nearly perfect) but only 0.599 for unit and 0.493 for individual ID (below what random guessing would give for a balanced 3-class problem)
+- The ICI boxplot by coda type shows *why* classification works: 1+1+3 has median ICI ~222ms while 4D has ~85ms — they occupy completely different ranges
+- But the unit bars show *why* unit ID fails: Unit A (222ms), D (85ms), and F (180ms) overlap heavily with the coda-type ranges, so ICI cannot separate units
+- The design implication is critical: the rhythm encoder needs contrastive training to learn *within-type* micro-variation (subtle ICI differences between units producing the same coda type), not just between-type classification
+
+---
+
+## Slide 12: The Spectral Channel — Voice Identity in the Spectrogram
+
+**Title:** The Spectral Channel
+**Subtitle:** Mel-spectrograms encode voice identity — orthogonal to rhythm
+
+---
+
+### Layout: Three-column (left: sample spectrograms, center: centroid + independence, right: KPIs + insights)
+
+**Left column — Sample Mel-Spectrograms (3×2 grid):**
+
+6 mock mel-spectrogram panels (2 per unit), showing:
+- Unit A: coda #486 (1+1+3, 0.91s, 5 clicks) and coda #102 (5R1, 0.52s, 5 clicks)
+- Unit D: coda #890 (4D, 0.45s, 4 clicks) and coda #1105 (7D1, 0.88s, 7 clicks)
+- Unit F: coda #1320 (1+1+3, 0.78s, 5 clicks) and coda #1450 (5R1, 0.55s, 5 clicks)
+
+Parameters: 64 mel bins, fmax=8,000 Hz, magma colormap. Each shows vertical striations = click events, energy concentrated above 4 kHz.
+
+Caption: "Vertical striations = click events · 5 bands for 1+1+3 · Energy concentrated above 4 kHz"
+
+**Center column — Spectral Centroid by Unit:**
+
+| Unit | Median Centroid (Hz) | Std (Hz) |
+|---|---|---|
+| A | 9,963 | 1,044 |
+| D | 9,683 | 2,244 |
+| F | 9,598 | 4,259 |
+
+Visual: three unit-colored bars with variance bands showing the std spread. Note that Unit F has much higher variance.
+
+Caption: "Centroids heavily overlap — no unit separation from global frequency"
+
+**Center column — Rhythm vs. Spectral Independence (scatter plot):**
+
+Scatter plot: X-axis = Mean ICI (ms), Y-axis = Spectral Centroid (Hz). Points colored by unit. Shows random scatter with no linear trend.
+
+**Annotation:** Pearson r ≈ 0 — the two channels are statistically independent.
+
+**Right column — KPI boxes:**
+- **0.740** — Raw Mel → Unit F1
+- **64 × T** — Mel-spectrogram dims
+- **r ≈ 0** — Channel independence
+
+**Key finding callout (dark background):**
+> Spectral texture separates units (F1=0.740) while ICI cannot (0.599). The voice fingerprint is in the spectrogram.
+
+**Implication callout (light background):**
+> A CNN on the full mel-spectrogram is needed — global centroid cannot capture within-click vowel texture.
+
+---
+
+**Chart spec:** Left: 3×2 grid of SVG mock spectrograms (dark background, magma-colored vertical bands for clicks). Center top: unit-colored bars with transparent variance bands. Center bottom: SVG scatter plot with unit-colored dots, Pearson r annotation. Right: KPI boxes (Inknut Antiqua large numbers) + InsightBox components.
+
+---
+
+#### Talking points
+- The spectrograms show what a coda "looks like" to the CNN encoder: vertical high-energy bands (one per click) separated by silence, with the band shape and frequency distribution encoding speaker identity
+- The centroid chart shows that a single summary statistic (spectral centroid) is not enough to separate units — the distributions heavily overlap, and Unit F's variance (σ=4,259 Hz) is 4× that of Unit A
+- The independence scatter is the key theoretical result: rhythm and spectral are orthogonal (r≈0). This is not an assumption — it's an empirical finding that justifies the dual-channel encoder architecture
+- Raw mel achieves F1=0.740 for unit ID — substantially better than raw ICI (0.599). The spectral channel carries the identity signal that the rhythm channel cannot access
+- The design implication is that a learned CNN representation on the full 64×T mel-spectrogram is needed, not just global frequency statistics. The within-click vowel texture that Beguš et al. (2024) showed carries speaker identity requires spatial features that only a convolutional architecture can capture
+
+---
+
+## Slide 13: The Imbalance Trap — Why Accuracy Lies
+
+**Title:** The Imbalance Trap
+**Subtitle:** A model that always says "Unit F" looks 59% accurate — but knows nothing
+
+---
+
+### Layout: Two-column contrast (left = the trap, right = the fix)
+
+**Left column header: "The Naive Metric" (red background)**
+
+**Visual: Waffle chart (10×10 grid of squares)**
+- 59 squares filled green (Unit F)
+- 22 squares filled orange (Unit D)
+- 18 squares filled blue (Unit A)
+- 1 square left white (rounding)
+- Caption: "Each square = ~1% of the dataset"
+
+**Below waffle chart:**
+- Big number: **59.4%** — "Accuracy of 'always predict Unit F'"
+- ❌ "Looks reasonable. Completely useless."
+
+---
+
+**Right column header: "The Real Metric" (green background)**
+
+**Visual: 3×3 confusion matrix (annotated cells)**
+
+A model that always predicts Unit F produces this confusion matrix:
+```
+             Predicted A   Predicted D   Predicted F
+Actual A     0             0             241
+Actual D     0             0             321
+Actual F     0             0             821
+```
+- Per-class F1: A = 0.00 | D = 0.00 | F = 0.745
+- **Macro-F1 = 0.248** — the average (0.00 + 0.00 + 0.745) / 3
+
+**Below matrix:**
+- Big number: **0.248** — "Macro-F1 of the same 'always Unit F' model"
+- ✅ "Penalizes ignoring minority classes equally."
+
+---
+
+**Bottom banner (full width):**
+> **Three consequences for every experiment:**
+> 1. Primary metric: Macro-F1, not accuracy
+> 2. Training: `WeightedRandomSampler` — each batch ~equal across units
+> 3. Probe: `class_weight="balanced"` — minority class errors penalized more
+
+**KPI strip (right margin):**
+- `59.4%` — largest class (Unit F)
+- `0.248` — macro-F1 of majority-class baseline
+- `3×` — class weight for Unit A (inverse of 18.2%)
+
+---
+
+**Chart spec:** Left panel: waffle chart — 10×10 grid of colored squares using `matplotlib.patches.Rectangle`; colors by unit proportion. Right panel: 3×3 annotated heatmap with `seaborn.heatmap`, cmap="Blues", annot=True, fmt="d"; row/column labels = unit names.
+
+---
+
+#### Talking points
+- The waffle chart makes the imbalance visceral — you immediately see that 6 out of every 10 squares are Unit F
+- The confusion matrix on the right shows what "good accuracy" actually looks like internally: the model has learned nothing about Unit A or Unit D — it just predicts F for everything
+- Macro-F1 = 0.248 for this "model" — below 0.333, which is what random guessing gives you on a 3-class problem. The majority-class baseline is *worse* than random in terms of macro-F1
+- This is why every result table in the paper leads with macro-F1. When we report WhAM's F1 = 0.895, that means it correctly identifies Unit A, D, and F roughly equally well — not that it's good at Unit F and ignoring the others
+- The three consequences are design decisions baked into every phase of the project
+
+---
+
+## Slide 14: Reading a Coda Type — The Rhythm Vocabulary
+
+**Title:** Reading a Coda Type
+**Subtitle:** The click pattern is the word — ICI is the pronunciation
+
+---
+
+### Layout: Dictionary-style cards — one card per major coda type
+
+**Header:**
+> "Coda types are named by their click count and rhythm. The name is literally the pattern."
+
+---
+
+**Card grid: 4 cards in a 2×2 layout**
+
+**Card 1 — 1+1+3** (most common, 486 codas, 35.1% of clean)
+- Click pattern diagram: `● ——long—— ● ——long—— ● ● ●`
+- ICI values (typical): [218ms, 226ms, 81ms, 76ms]
+- Visual: 5 dots on a horizontal timeline, colored by gap length (long gaps orange, short gaps grey)
+- **Big stat:** 486 codas · present in all 3 units
+- **Biological role:** Clan identity marker (stable across 30+ years in EC1)
+- Color band: neutral grey (shared across all units)
+
+**Card 2 — 5R1** (2nd most common, 236 codas)
+- Click pattern diagram: `● ·· ● ·· ● ·· ● ·· ●` (5 regularly spaced clicks)
+- ICI values (typical): [101ms, 99ms, 102ms, 98ms] (regular, ~100ms between each)
+- Visual: 5 equidistant dots on timeline, all gap colors identical
+- **Big stat:** 236 codas · present in all 3 units
+- **Biological role:** Encodes individual identity (ICI micro-variation within this type distinguishes individuals — Gero et al. 2016)
+- Color band: neutral grey (shared)
+
+**Card 3 — 4D** (3rd most common, 167 codas)
+- Click pattern diagram: `● —fast→ ● —faster→ ● —fastest→ ●` (accelerating)
+- ICI values (typical): [120ms, 90ms, 65ms] (descending = accelerating)
+- Visual: 4 dots, gaps decreasing left-to-right, color gradient blue→red
+- **Big stat:** 167 codas · present in all 3 units
+- **Biological role:** "D" = descending ICI tempo pattern
+
+**Card 4 — 7D1** (4th most common, 122 codas)
+- Click pattern diagram: `● · ● · ● · ● · ● · ● · ● ·extra`
+- ICI values (typical): [85ms, 88ms, 82ms, 89ms, 84ms, 87ms, 200ms] (6 regular + 1 long outlier)
+- Visual: 7 dots, first 6 evenly spaced, last gap extra long
+- **Big stat:** 122 codas · present in all 3 units
+- **"1" suffix** = one extra long interval at the end
+
+**Bottom insight callout box:**
+> **Why does coda type not reveal the speaker?**  
+> The top 4 types (1+1+3, 5R1, 4D, 7D1) together = **75% of all codas** — and all 4 appear in every unit.  
+> Unit A, D, and F speak the same "words." The identity is in the *accent*, not the word.
+
+**KPI row:**
+- `22` active coda types in experiments
+- `75%` of codas covered by top 4 types
+- `9` coda types shared across all 3 units (top 20)
+
+---
+
+**Chart spec:** Each card contains a dot-timeline diagram. Implementation: for each coda type, draw N colored circles at positions `cumsum([0] + ICI_values)` on a horizontal axis using `matplotlib.scatter`. Gap annotations (ICI values in ms) placed between pairs of dots. Color-code gaps by length (green <100ms, orange 100–200ms, red >200ms). Cards arranged in 2×2 grid.
+
+---
+
+#### Talking points
+- The coda type name is a human-readable description of the click pattern. "1+1+3" means exactly what it says: one isolated click, then one isolated click, then three rapid clicks in a row
+- The diagrams make this concrete: you can immediately see the long-gap structure of 1+1+3 vs. the regular spacing of 5R1 vs. the accelerating compression of 4D
+- The critical insight at the bottom: the four most common types — covering 75% of all codas — are found in every unit. Knowing the coda type tells you nothing about the speaker
+- 5R1 has a special biological significance (noted by Gero et al. 2016): within this type, the micro-variation in ICI encodes individual identity. This is why the rhythm encoder needs contrastive training — it must learn within-type variation, not just between-type differences
+
+---
+
+## Slide 15: The Shared Vocabulary — What Units Say Together
+
+**Title:** The Shared Vocabulary
+**Subtitle:** Coda types are clan property, not unit property
+
+---
+
+### Layout: Three-column (left: heatmap table, middle: sharing + codas/unit + key patterns, right: KPIs + why it matters + insight)
+
+**Left column — Annotated Coda Type × Unit Heatmap Table**
+
+CSS grid table with 5 columns: Coda Type | Unit A | Unit D | Unit F | Proportion. Cell background tinted by unit color (A=#4c72b0 blue, D=#dd8452 orange, F=#55a868 green) with opacity proportional to count/max. Zero values shown as "—". Rows grouped by sharing category with coloured section dividers. Proportion column shows inline stacked bars (unit-coloured).
+
+**Raw counts for the top 15 types:**
+
+| Coda Type | Unit A | Unit D | Unit F | Total | Sharing |
+|---|---|---|---|---|---|
+| 1+1+3 | 160 | 210 | 116 | 486 | All 3 units |
+| 5R1 | 78 | 62 | 96 | 236 | All 3 units |
+| 4D | 23 | 65 | 79 | 167 | All 3 units |
+| 7D1 | 14 | 52 | 56 | 122 | All 3 units |
+| 3R1 | 18 | 8 | 29 | ~55 | All 3 units |
+| 4R1 | 5 | 12 | 28 | ~45 | All 3 units |
+| 3 | 7 | 5 | 18 | ~30 | All 3 units |
+| 5D1 | 1 | 3 | 15 | ~19 | All 3 units |
+| 5 | 0 | 2 | 38 | ~40 | Unit D+F |
+| 4 | 12 | 0 | 14 | ~26 | Unit A+F |
+| 7R1 | 0 | 9 | 16 | ~25 | Unit D+F |
+| 6R1 | 3 | 0 | 11 | ~14 | Unit A+F |
+| 6D | 0 | 0 | 35 | ~35 | Unit F only |
+| 9 | 0 | 0 | 18 | ~18 | Unit F only |
+| 8 | 0 | 0 | 15 | ~15 | Unit F only |
+
+Grid column widths: 85px 78px 78px 78px 140px. Section headers span full grid row with sharing-category coloured dots (slate blue=all, periwinkle=partial, yellow=exclusive).
+
+---
+
+**Middle column — Sub-column A (flex: 1)**
+
+**Sharing Summary card (white background, rounded corners):**
+| Category | Colour | Count | Note |
+|---|---|---|---|
+| All 3 units | Slate blue (#4f7088) | 9 | clan vocabulary |
+| 2 units | Periwinkle (#8e9bff) | 6 | partial overlap |
+| 1 unit only | Yellow (#e8e28b) | 5 | unit markers? |
+
+Big numbers (Inknut Antiqua, 20px bold) coloured by sharing category. Short note beside each.
+
+**Codas per Unit card (white background):**
+Horizontal bar chart — Unit A: 321, Unit D: 428, Unit F: 584. Bars coloured by unit (seaborn colours), width proportional to count with Unit F as 100%.
+
+**Key Patterns card (light background):**
+- **1+1+3** — Clan signature — equal use across all units
+- **6D** — Unit F only — potential unit marker (35 codas)
+- **4D** — Shared but uneven — usage differs by unit
+
+---
+
+**Right column — Sub-column B (flex: 1)**
+
+**At a Glance card (white background):**
+| Value | Label |
+|---|---|
+| **15** | Coda types analysed |
+| **76%** | Covered by top 4 types |
+| **1,333** | Total codas (top 15) |
+
+Values in Inknut Antiqua 22px bold, labels in 10px secondary text.
+
+**Why This Matters card (white background, flex: 1):**
+- → Coda type alone cannot distinguish units — the vocabulary is shared
+- → Exclusive types (6D, 9, 8) are too rare to train a classifier on
+- → Even shared types have uneven usage — a frequency signal exists but is weak
+- → Identity must come from how the coda is spoken, not which coda is spoken
+
+Arrows in slate blue (#4f7088), text in secondary colour.
+
+**Bottom insight strip (dark background, white text):**
+> 9 of 20 coda types appear in all 3 units. A coda-type-only model sees the same vocabulary everywhere. Identity is not in the type — it is in the voice.
+
+---
+
+**Chart spec:** React CSS grid heatmap (Slide13.jsx) — not a matplotlib figure. Grid: `85px 78px 78px 78px 140px`. Cell backgrounds: unit-tinted RGBA via seaborn colours (#4c72b0, #dd8452, #55a868) with opacity = (count / globalMax) × 0.5. Proportion bars: inline stacked flexbox divs. Rows grouped into 3 sections by sharing category. Right area: two flex sub-columns with white rounded cards. InsightBox component at bottom-right. Also saved as standalone matplotlib figure: `figures/shared_vocabulary_heatmap.png` (transparent background, 200 DPI).
+
+---
+
+#### Talking points
+- The row grouping makes the sharing structure immediately visible: the top section (9 types in all 3 units) dominates the dataset; the bottom section (5 unit-exclusive types) is tiny
+- The 9 fully shared types (including all top 4) cover ~76% of all codas. These are the backbone of the EC1 clan dialect — every family unit uses them
+- Unit-exclusive types (6D, 9, 8) are interesting because they could be unit-identity markers. But they're rare — 6D appears only 35 times. You can't train a classifier on 35 examples
+- Even for shared types like 4D, the raw counts differ significantly across units (A:23, D:65, F:79). This usage frequency difference is a unit signal, but it requires knowing the population statistics — an encoder must learn it from relative proportions, not absolute types
+- The "Why This Matters" card ties this directly to model design: coda type → shared → useless for unit ID → need spectral channel
+
+---
+
+## Slide 16: The Data Funnel — How 1,501 Becomes 762
+
+**Title:** The Data Funnel
+**Subtitle:** From 1,501 recordings to the usable subsets for each task
+
+---
+
+### Layout: Vertical funnel / step diagram
+
+**Stage 1 — Top of funnel:**
+```
+╔═══════════════════════════════════╗
+║  1,501  DSWP audio files          ║
+║  All codas, all units, all noise   ║
+╚═══════════════════════════════════╝
+```
+**→ Remove 118 noise-contaminated codas (is_noise=1)**
+
+**Stage 2:**
+```
+╔═══════════════════════════════════╗
+║  1,383  Clean codas               ║
+║  Used for: Unit ID, Coda Type     ║
+╚═══════════════════════════════════╝
+```
+**→ Remove 672 codas with IDN=0 (unidentified whale)**
+
+**Stage 3:**
+```
+╔═══════════════════════════════════╗
+║  762  Identified codas            ║
+║  14 unique whale IDNs             ║
+╚═══════════════════════════════════╝
+```
+**→ Remove 1 singleton individual (only 1 coda, cannot be split)**
+
+**Stage 4 — Bottom of funnel:**
+```
+╔═══════════════════════════════════╗
+║  762  Codas · 12 individuals      ║
+║  Used for: Individual ID task     ║
+╚═══════════════════════════════════╝
+```
+
+---
+
+**Right side — Loss breakdown table:**
+
+| Stage | Lost | Reason |
+|---|---|---|
+| 1,501 → 1,383 | −118 (7.9%) | Biologist-flagged noise contamination |
+| 1,383 → 762 | −621 (44.9%) | Multi-whale encounters; speaker unknown |
+| 762 → 762 | −0 (0%) | Singletons removed from split only |
+| **Final** | **762** | **50.8% of original** |
+
+---
+
+**KPI callout boxes (bottom row):**
+
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│   1,383         │  │   762           │  │   12            │
+│ Clean codas     │  │ Identified      │  │ Individuals     │
+│ Unit/Type tasks │  │ ID-task codas   │  │ in ID task      │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+**Callout note:**
+> The 621-coda loss (IDN=0, mostly Unit F) is not a data quality problem — it is a field reality. Unit F is the largest social group; when multiple whales vocalize simultaneously, attribution is impossible without bioacoustic localization equipment. The DSWP field team attributes codas only when confident.
+
+---
+
+**Chart spec:** Vertical funnel using `matplotlib.patches.FancyBboxPatch` for each stage box. Boxes connected by downward arrows (`FancyArrowPatch`). Box width proportional to coda count (1,501 → 1,383 → 762). Box fill colors: Stage 1 grey, Stage 2 blue (#4C72B0), Stage 3 purple (#8172B2). Annotation beside each arrow: count removed + reason.
+
+---
+
+#### Talking points
+- The funnel visualizes where the data goes and why — making the 762 individual ID number feel justified rather than arbitrary
+- The noise removal (−118) is conservative: biologists flagged codas that contain clear recording artifacts or were produced during clicks that overlapped with echolocation. These are excluded from all experiments
+- The IDN=0 removal (−621) is the large drop. This is almost entirely Unit F codas — which already has 73.2% unidentified rate. For the individual ID experiment, we lose most of Unit F, which actually helps with the class balance within that task
+- The 12 individuals that remain have between ~20 and ~150 codas each — enough to train and evaluate a classifier
+
+---
+
+## Slide 17: Individual Identity — 12 Voices in the Data
+
+**Title:** 12 Voices in the Data
+**Subtitle:** Individual ID is the hardest classification task — and the most biologically meaningful
+
+---
+
+### Layout: "Identity card" grid — 12 whale ID cards in a 4×3 layout
+
+**Each card shows (for one of the 12 individuals):**
+- IDN number (whale numeric ID, e.g., IDN=3)
+- Unit membership (colored header: blue for A, orange for D, green for F)
+- Coda count
+- Dominant coda type (most frequent type for this individual)
+- Mean ICI (ms) — individual's "rhythm tempo"
+
+**Approximate values per individual (from dswp_labels.csv):**
+
+| IDN | Unit | Codas | Top Coda Type | Mean ICI (ms) |
+|---|---|---|---|---|
+| IDN-A1 | A | ~55 | 1+1+3 | ~230 |
+| IDN-A2 | A | ~50 | 5R1 | ~110 |
+| IDN-A3 | A | ~45 | 1+1+3 | ~225 |
+| IDN-A4 | A | ~40 | 5R1 | ~95 |
+| IDN-A5 | A | ~24 | 4D | ~85 |
+| IDN-D1 | D | ~85 | 1+1+3 | ~95 |
+| IDN-D2 | D | ~80 | 4D | ~82 |
+| IDN-D3 | D | ~75 | 7D1 | ~88 |
+| IDN-D4 | D | ~55 | 5R1 | ~105 |
+| IDN-D5 | D | ~35 | 1+1+3 | ~90 |
+| IDN-F1 | F | ~145 | 1+1+3 | ~190 |
+| IDN-F2 | F | ~100 | 5R1 | ~175 |
+
+*Note: IDN values are numeric IDs from DominicaCodas.csv; exact names are field labels. Counts are approximate.*
+
+---
+
+**Bottom strip: Why this task is hard**
+
+Three KPI boxes:
+```
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ 12 classes       │  │ Rhythm shared    │  │ 762 total codas  │
+│ ~63 codas/class  │  │ across units     │  │ ~63 per class    │
+│ Very small N     │  │ (ICI ≠ ID)       │  │ (tiny dataset)   │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+```
+
+**Baseline comparison callout:**
+| Model | Individual ID Macro-F1 |
+|---|---|
+| Raw ICI only | 0.493 (near-chance) |
+| Raw Mel only | 0.272 |
+| WhAM L10 | 0.454 |
+| DCCE spectral-only | **0.787** |
+| DCCE-full | **0.834** |
+
+---
+
+**Chart spec:** 4×3 grid of cards using `matplotlib.patches.FancyBboxPatch`. Each card: unit-colored header bar at top (height 0.15 normalized), IDN label in bold, then 3 lines of stats. Below the card grid: grouped bar chart showing per-individual coda counts, colored by unit, sorted descending.
+
+---
+
+#### Talking points
+- Individual ID is the hardest of the three classification tasks — 12 classes, ~63 examples per class, and the rhythm channel is essentially useless for it (F1=0.493 from raw ICI)
+- Looking at the cards: individuals from the same unit have similar coda type preferences (same "vocabulary"), but the spectral texture distinguishes them. The voice fingerprint is in the mel-spectrogram, not the ICI
+- The DCCE spectral-only model achieves F1=0.787 for individual ID — nearly 2x the WhAM baseline (0.454). This is the strongest result in the paper and the clearest demonstration that the spectral CNN is learning real individual-identity information
+- The DCCE-full model reaches 0.834 — the fusion of rhythm and spectral channels achieves better individual ID than either channel alone
+
+---
+
+## Slide 18: The Year Problem — A Timeline of Recordings
+
+**Title:** When Were They Recorded?
+**Subtitle:** Units A, D, and F were not recorded at the same time
+
+---
+
+### Layout: Timeline infographic (main) + confound numbers (right)
+
+**Main visual: Horizontal timeline with recording "stripes" per unit**
+
+```
+Year    2005                2006   2007   2008   2009         2010
+        ████████████████            ░░░░░  ░░░   ██████████████████
+Unit A  [==== 171 codas ====]       [~20]  [~30] [==== 20 ====]
+        
+Unit D  [= 3 =]                                  [======= 301 ====]
+
+Unit F  [=31=]              [===]   [===]  [=25=] [=====]  [==88==]
+```
+
+**Actual year counts (from recording date column, clean codas):**
+
+| Unit | 2005 | 2006–07 | 2008 | 2009 | 2010 |
+|---|---|---|---|---|---|
+| A | ~171 | 0 | ~20 | ~30 | ~20 |
+| D | ~3 | 0 | ~5 | ~5 | ~308 |
+| F | ~31 | ~est.60 | ~25 | ~24 | ~88 |
+
+*(Note: Unit F has additional recordings in years not fully broken down; sum = 821 clean codas)*
+
+**Right side KPI panel:**
+
+```
+Cramér's V
+(Unit × Year association)
+
+╔═══════╗
+║ 0.51  ║  STRONG
+╚═══════╝
+
+Scale:
+< 0.1   Negligible
+0.1–0.3 Small
+0.3–0.5 Moderate
+> 0.5   ← We are here
+```
+
+**Below timeline: "What this means for a model"**
+
+Two-column box:
+
+| If model learns... | It might actually be learning... |
+|---|---|
+| Unit A features | 2005 recording conditions |
+| Unit D features | 2010 recording conditions |
+| Unit F features | Mixed year equipment drift |
+
+**Bottom callout (red background):**
+> ⚠ WhAM's unit F1 = 0.895 at layer 19. Year F1 at the same layer = 0.875. The model cannot reliably tell us whether it learned whale voices or microphone calibration from 2005 vs. 2010.
+
+**DCCE advantage callout (green background):**
+> ✓ Our DCCE rhythm encoder uses pre-computed ICI values from the field database — not extracted from audio. ICI numbers are invariant to recording equipment drift. The year confound does not affect the rhythm channel.
+
+---
+
+**Chart spec:** Main timeline: `matplotlib.barh` with one bar per unit per year, stacked or grouped by year (x-axis = year, y-axis = unit). Bar colors = unit colors. Bar width proportional to coda count. Cramér's V panel: a color-coded scale bar (gradient from white to dark red for 0→0.6) with arrow pointing to 0.51. Table below: styled `matplotlib.table` with alternating row colors.
+
+---
+
+#### Talking points
+- This slide answers "why does the year confound matter?" with a picture: you can literally see that Unit A was recorded primarily in 2005 and Unit D primarily in 2010
+- Any acoustic change between 2005 and 2010 — equipment upgrades, hydrophone sensitivity drift, changes in recording protocol, underwater ambient noise levels in different seasons — gets encoded as a spurious "unit" feature
+- Cramér's V = 0.51 is above the 0.5 threshold for strong association. This is a statistically non-trivial confound, not a minor effect
+- The WhAM probing results (Spearman ρ = 0.63 between year and unit F1 across layers) confirm that the model's internal representations cannot cleanly separate biological identity from recording period
+- The DCCE advantage is architectural: because the ICI sequences come from a CSV (not from audio re-extraction), they are immune to acoustic drift. This is not a trick — it's a deliberate design choice motivated by this exact finding
+
+---
+
+## Slide 19: What the EDA Tells the Model — Design Decisions
+
+**Title:** From Data to Design
+**Subtitle:** Every architectural decision has a data justification
+
+---
+
+### Layout: 3-column decision cards (Finding → Why it matters → Decision)
+
+**Decision Card 1: Two Encoders**
+
+| | |
+|---|---|
+| **Finding** | Raw ICI F1=0.931 for coda type, 0.599 for unit. Raw mel F1=0.740 for unit. Both channels needed. |
+| **Why** | Neither channel alone can solve all three tasks. They are independent (Pearson r≈0). |
+| **Decision** | **Dual-channel encoder** — GRU for ICI rhythm, CNN for mel spectral. Explicit separation. |
+| **Data support** | t-SNE: ICI clusters by coda type, not unit. Mel features partially separate units. |
+
+---
+
+**Decision Card 2: Contrastive Loss (not classification loss)**
+
+| | |
+|---|---|
+| **Finding** | Within each coda type, units are completely mixed in ICI space. |
+| **Why** | Classification loss collapses to coda type (the easy signal). Micro-variation within types is what encodes identity. |
+| **Decision** | **NT-Xent contrastive loss** — same-unit codas are positive pairs regardless of coda type. Forces encoder to learn within-type variation. |
+| **Data support** | Coda type × unit heatmap: 9 types shared across all 3 units. |
+
+---
+
+**Decision Card 3: Cross-Channel Positive Pairs**
+
+| | |
+|---|---|
+| **Finding** | Rhythm and spectral are orthogonal: same unit, any coda type. |
+| **Why** | A unit-A whale using a 1+1+3 coda should be "similar" to a unit-A whale using a 5R1 coda — same speaker, different word. |
+| **Decision** | **Cross-channel positive pairs**: `sim(rhythm(coda_A1), spectral(coda_A2))` is a positive pair if A1 and A2 are the same unit. This is the DCCE architectural novelty. |
+| **Data support** | Channel independence scatter: r≈0. Heatmap: coda types not predictive of unit. |
+
+---
+
+**Decision Card 4: Macro-F1 + Balanced Sampling**
+
+| | |
+|---|---|
+| **Finding** | Unit F = 59.4%. Majority-class accuracy = 59.4% but macro-F1 = 0.248 (below chance). |
+| **Why** | Any training or evaluation protocol that optimizes accuracy will learn to ignore Unit A and D. |
+| **Decision** | **Macro-F1 as primary metric** + `class_weight="balanced"` in probes + `WeightedRandomSampler` in DCCE training. |
+| **Data support** | Label distribution bar chart; IDN=0 investigation by unit. |
+
+---
+
+**Decision Card 5: ICI from CSV (not re-extracted)**
+
+| | |
+|---|---|
+| **Finding** | Cramér's V(unit × year) = 0.51. WhAM year-probe F1 = 0.875 at best unit layer. |
+| **Why** | Re-extracting ICI from audio inherits recording-year acoustic drift. Pre-computed CSV values do not. |
+| **Decision** | **Rhythm encoder uses DominicaCodas ICI values directly** — not peak detection from WAV files. Year confound cannot contaminate the rhythm channel. |
+| **Data support** | Year timeline; layer-wise WhAM probing curves. |
+
+---
+
+**Decision Card 6: No Vowel Supervision**
+
+| | |
+|---|---|
+| **Finding** | codamd.csv vowel labels (a/i) cover codaNUM 4,933–8,860. DSWP is 1–1,501. Zero overlap. |
+| **Why** | No public vowel labels exist for our audio. Cannot train spectral encoder on explicit vowel targets. |
+| **Decision** | **Spectral encoder trained via unit-contrastive + individual-ID auxiliary loss** — learns voice fingerprint without vowel supervision. Tested post-hoc by year confound analysis. |
+| **Data support** | Label investigation table (Slide 2). codamd.csv coverage gap. |
+
+---
+
+**Bottom KPI row:**
+```
+6 architectural decisions  ·  All traceable to EDA findings  ·  None arbitrary
+```
+
+---
+
+**Chart spec:** 6 cards in a 2×3 or 3×2 grid using `matplotlib.patches.FancyBboxPatch`. Each card: colored header stripe (rotating palette per card), three rows of text (Finding / Why / Decision). Cards connected by invisible flow (left-to-right reading order). No charts inside cards — text-only with bold key terms. Optional: small icon per card (e.g., a small neural network diagram, a small scatter, a confusion matrix sketch) using `matplotlib` inset axes.
+
+---
+
+#### Talking points
+- This is the "putting it all together" slide for the EDA section — it translates every data finding into a model design decision
+- Card 1 (two encoders) is the most fundamental: the whole architecture is justified by the empirical finding that ICI and mel capture orthogonal signals
+- Card 3 (cross-channel positive pairs) is the architectural novelty: in standard contrastive learning, your positive pairs come from augmentations of the same sample. In DCCE, positive pairs come from two different samples from the same social unit — one through the rhythm encoder, one through the spectral encoder. This is only valid because the channels are independent
+- Card 5 (ICI from CSV) is a quiet but important engineering decision that directly addresses the year confound found in Card 6 of the WhAM probing analysis
+- Card 6 (no vowel supervision) closes the loop on Slide 2's label investigation: the failure to find vowel labels for DSWP wasn't a dead end — it forced a more general training approach
