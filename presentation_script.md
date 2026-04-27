@@ -476,7 +476,15 @@
 
 <tr>
 <td><img src="slide-app/public/figures/slides/slide_23.jpg" width="100%"/></td>
-<td>With the data understood, we now introduce DCCE — Dual-Channel Contrastive Encoder. It is a purpose-built architecture that encodes the known biological two-channel structure as an inductive prior. A rhythm GRU and spectral CNN each produce 64-dimensional embeddings, fused into a joint 64-d representation. The headline: +0.380 F1 on individual ID over WhAM, with 6.7× less data, on a laptop.</td>
+<td>With the data understood, we now introduce DCCE — Dual-Channel Contrastive Encoder. It is a purpose-built architecture that encodes the known biological two-channel structure as an inductive prior. A rhythm GRU and spectral CNN each produce 64-dimensional embeddings, fused into a joint 64-d representation. The headline: +0.380 F1 on individual ID over WhAM, with 6.7× less data, on a laptop.
+
+-> we start with whale sound, but we do not treat it as one undifferentiated signal.
+
+What we’re doing: we take each whale coda and split it into two biologically meaningful channels:
+
+Rhythm / timing channel — the sequence of inter-click intervals (ICI), which captures the coda’s temporal pattern: basically what was said.
+Spectral / acoustic channel — the mel spectrogram, which captures the fine acoustic texture of the clicks: basically who said it.
+So the architecture is “multi-modal” in the sense that it learns from two complementary views of the same sound. One encoder handles the ICI rhythm sequence with a BiGRU, another handles the spectrogram with a CNN, and then we fuse those embeddings into one shared representation.</td>
 </tr>
 <tr>
 <td colspan="2" style="background:#1c1c2e;padding:14px 20px;border-top:1px solid #2a2a4a;color:#e2e8f0;">
