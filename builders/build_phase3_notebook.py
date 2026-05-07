@@ -70,7 +70,10 @@ warnings.filterwarnings("ignore")
 %matplotlib inline
 plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
 
-BASE   = os.path.abspath(".")
+HERE   = os.path.abspath(".")
+BASE   = HERE if os.path.isdir(os.path.join(HERE, "datasets")) else os.path.dirname(HERE)
+if not os.path.isdir(os.path.join(BASE, "datasets")):
+    raise FileNotFoundError(f"Could not locate datasets/ from working directory: {HERE}")
 DATA   = os.path.join(BASE, "datasets")
 AUDIO  = os.path.join(DATA, "dswp_audio")
 FIGS   = os.path.join(BASE, "figures", "phase3")
